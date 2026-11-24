@@ -23,7 +23,8 @@ PLACEHOLDER_AREA = 1.0                 # m², 미만이면 placeholder로 제외
 H_MIN, H_MAX = 2.0, 600.0              # 절대 범위(안전장치)
 RATIO_MIN, RATIO_MAX = 2.0, 8.0        # 2층 이상 높이/층수 정상 범위
 SINGLE_MAX = 20.0                      # 1층 높이 상한
-SINGLE_EXEMPT = {"공장", "창고시설", "운동시설", "종교시설"}
+# 1층·20m 초과 검사 대상 용도. 그 밖의 용도(공장·굴뚝이 있는 처리시설 등)와 주용도 결측은 원본 유지
+SINGLE_CHECK = {"단독주택", "공동주택", "제1종근린생활시설", "제2종근린생활시설", "근린생활시설", "업무시설"}
 FLOOR_A, FLOOR_B = 1.9, 2.9            # 층수 대체: a + b×층수
 AREA_BINS = [0, 20, 50, 100, 200, 500, np.inf]
 AREA_DEFAULT = [3.5, 4.0, 4.7, 5.9, 7.5, 9.5]
@@ -88,7 +89,8 @@ def refine(g: gpd.GeoDataFrame) -> tuple[gpd.GeoDataFrame, dict]:
     r_low = multi & (ratio < RATIO_MIN)
     r_high = multi & (ratio > RATIO_MAX)
     single_tall = has_h & ~out_rng & (fl == 1) & (h > SINGLE_MAX)
-    exempt = single_tall & use_n.isin({re.sub(r"[\s.·ㆍ]", "", u) for u in SINGLE_EXEMPT}).fillna(False).to_numpy()
+    checked = use_n.isin({re.sub(r"[\s.·ㆍ]", "", u) for u in SINGLE_CHECK}).fillna(False).to_numpy()
+    exempt = single_tall & ~checked
     keep = ~excluded                                                      # 높이 플래그는 렌더링 대상에만 붙인다
     add(out_rng & keep, "out_of_range")
     add(r_low & keep, "ratio_low")
@@ -131,7 +133,7 @@ def refine(g: gpd.GeoDataFrame) -> tuple[gpd.GeoDataFrame, dict]:
     meta = {
         "rules": {"placeholder_area_m2": PLACEHOLDER_AREA, "abs_range_m": [H_MIN, H_MAX],
                   "ratio_range_multi_story": [RATIO_MIN, RATIO_MAX], "single_story_max_m": SINGLE_MAX,
-                  "single_story_exempt_uses": sorted(SINGLE_EXEMPT), "floors_formula": f"{FLOOR_A} + {FLOOR_B} * floors",
+                  "single_story_check_uses": sorted(SINGLE_CHECK), "floors_formula": f"{FLOOR_A} + {FLOOR_B} * floors",
                   "area_default": {f"[{a},{b})": v for a, b, v in zip(AREA_BINS[:-1], AREA_BINS[1:], AREA_DEFAULT)},
                   "large_default_area_m2": LARGE_DEFAULT_AREA, "status": "임시. 서울 확인 후 확정"},
         "counts": {

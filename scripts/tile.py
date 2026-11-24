@@ -6,6 +6,7 @@
 
 형식은 docs/tiles.md. 건물은 중심점이 속한 타일에 배정한다(자르지 않음).
 LOD 0: 원래 외곽선 / LOD 1: 최소 회전 사각형(박스) / LOD 2: 작은 저층 건물 생략 + 박스
+창 격자용 층수(u8)를 함께 저장한다(BLDT v2).
 """
 import argparse
 import gzip
@@ -19,7 +20,8 @@ import numpy as np
 import shapely
 
 FACADE_ENUM = ["unknown", "apartment", "house", "commercial", "office", "industrial", "public"]
-MAGIC, VERSION = b"BLDT", 1
+MAGIC, VERSION = b"BLDT", 2   # v2: 층수(u8) 배열 추가
+MIN_FLOOR_SAMPLE = 100       # 그룹 층고 중앙값을 쓰는 최소 표본 수. 미만이면 전체 중앙값
 LOD2_MIN_AREA, LOD2_MIN_HEIGHT = 100.0, 12.0   # LOD2는 면적 100m² 이상 또는 높이 12m 이상만 남긴다
 
 
@@ -54,14 +56,34 @@ def tri_count(nv_rings: np.ndarray, ring_part: np.ndarray, n_parts: int) -> np.n
     return (2 * e + (e - 2 + 2 * holes)).astype(np.int64)            # 벽 2e + 지붕 (e-2+2h), 바닥 없음
 
 
-def encode(ix, iy, lod, ring_part, nv, coords, height, facade, origin) -> bytes:
+def floors_used(b) -> tuple[np.ndarray, dict]:
+    """창 격자용 층수. 원본 층수가 높이 산정에 쓰였으면(orig·floors) 그 값, 아니면 높이 / 그룹 층고 중앙값."""
+    fl = b.src_floors.fillna(0).to_numpy(float)
+    h = b.height_m.to_numpy(float)
+    known = b.h_src.isin(["orig", "floors"]).to_numpy() & (fl > 0)
+    sample = known & (b.h_src == "orig").to_numpy()
+    ratio = h[sample] / fl[sample]
+    overall = float(np.median(ratio))
+    fh = {}
+    for gname in FACADE_ENUM:
+        m = (b.facade.to_numpy()[sample] == gname)
+        fh[gname] = round(float(np.median(ratio[m])), 2) if m.sum() >= MIN_FLOOR_SAMPLE else round(overall, 2)
+    est = np.maximum(1, np.round(h / b.facade.map(fh).to_numpy(float)))
+    out = np.where(known, fl, est)
+    return np.clip(out, 1, 255).astype(np.uint8), {"floor_height_m": fh, "overall_m": round(overall, 2),
+        "rule": "h_src가 orig·floors이고 원본 층수>0이면 원본 층수, 아니면 round(height_m / 그룹 층고 중앙값), 최소 1. "
+                f"층고 중앙값은 h_src=orig·층수>0 표본, 그룹 표본 {MIN_FLOOR_SAMPLE}개 미만이면 전체 중앙값"}
+
+
+def encode(ix, iy, lod, ring_part, nv, coords, height, facade, floors, origin) -> bytes:
     n_parts, n_rings, n_verts = len(height), len(nv), len(coords)
     prism_ring_start = np.r_[0, np.cumsum(np.bincount(ring_part, minlength=n_parts))].astype("<u4")
     ring_vert_start = np.r_[0, np.cumsum(nv)].astype("<u4")
     head = MAGIC + struct.pack("<BBHIIIIii", VERSION, lod, 0, n_parts, n_rings, n_verts, 0, ix, iy)
     assert len(head) == 32
     body = [prism_ring_start.tobytes(), ring_vert_start.tobytes(),
-            (coords - origin).astype("<f4").tobytes(), height.astype("<f4").tobytes(), facade.astype("u1").tobytes()]
+            (coords - origin).astype("<f4").tobytes(), height.astype("<f4").tobytes(), facade.astype("u1").tobytes(),
+            floors.astype("u1").tobytes()]
     out = head + b"".join(body)
     return out + b"\0" * (-len(out) % 4)
 
@@ -88,6 +110,7 @@ def main() -> None:
     b, tx, ty = b.iloc[order].reset_index(drop=True), tx[order], ty[order]
     fac = b.facade.map({k: i for i, k in enumerate(FACADE_ENUM)}).fillna(0).to_numpy(np.uint8)
     hgt = b.height_m.to_numpy(np.float32)
+    flr, floor_info = floors_used(b)
 
     tiles = {}
     summary = {}
@@ -111,7 +134,7 @@ def main() -> None:
         for k, p0, p1, r0, r1, c0, c1 in zip(keys, p_start, p_end, r_start, r_end, c_start, c_end):
             ix, iy = int(k // 10_000_000), int(k % 10_000_000)
             origin = np.array([ix * T, iy * T], float)
-            data = encode(ix, iy, lod, ring_part[r0:r1] - p0, nv[r0:r1], coords[c0:c1], hgt[part_bldg[p0:p1]], fac[part_bldg[p0:p1]], origin)
+            data = encode(ix, iy, lod, ring_part[r0:r1] - p0, nv[r0:r1], coords[c0:c1], hgt[part_bldg[p0:p1]], fac[part_bldg[p0:p1]], flr[part_bldg[p0:p1]], origin)
             (out_dir / str(lod) / f"{ix}_{iy}.bin").write_bytes(data)
             gz = len(gzip.compress(data, 6))
             tot_raw += len(data)
@@ -135,6 +158,7 @@ def main() -> None:
         "format": "BLDT", "version": VERSION, "region": region, "crs": "EPSG:5186", "tile_size": T,
         "source": Path(a.path).name, "created": date.today().isoformat(),
         "facade_enum": FACADE_ENUM,
+        "floors": floor_info,
         "lods": [{"lod": 0, "name": "outline"}, {"lod": 1, "name": "box"},
                  {"lod": 2, "name": "box_large_only", "min_area_m2": LOD2_MIN_AREA, "min_height_m": LOD2_MIN_HEIGHT}],
         "bounds": [round(float(v), 1) for v in tb],

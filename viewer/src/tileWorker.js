@@ -1,5 +1,5 @@
-// 타일 바이너리(BLDT v1, docs/tiles.md)를 받아 LOD1 extrude 메시 버퍼를 만든다.
-// 메인 스레드를 막지 않도록 fetch·디코딩·삼각분할을 모두 여기서 한다.
+// 타일 바이너리(BLDT v2, docs/tiles.md)를 받아 LOD1 extrude 메시 버퍼를 만든다.
+// 메인 스레드를 막지 않도록 디코딩·삼각분할을 여기서 한다(받기는 메인 스레드: 개별 파일 또는 묶음 파일).
 import earcut from 'earcut';
 
 const HEADER = 32;
@@ -9,7 +9,7 @@ function decode(buf) {
   const magic = String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3));
   if (magic !== 'BLDT') throw new Error('BLDT 형식이 아닙니다');
   const version = dv.getUint8(4);
-  if (version !== 1) throw new Error(`지원하지 않는 버전 ${version}`);
+  if (version !== 2) throw new Error(`지원하지 않는 버전 ${version}. scripts/tile.py로 타일을 다시 만드세요`);
   const n = dv.getUint32(8, true);
   const nRings = dv.getUint32(12, true);
   const nVerts = dv.getUint32(16, true);
@@ -18,13 +18,14 @@ function decode(buf) {
   const ringVert = new Uint32Array(buf, o, nRings + 1); o += 4 * (nRings + 1);
   const verts = new Float32Array(buf, o, nVerts * 2); o += 8 * nVerts;
   const height = new Float32Array(buf, o, n); o += 4 * n;
-  const facade = new Uint8Array(buf, o, n);
-  return { n, nRings, nVerts, prismRing, ringVert, verts, height, facade };
+  const facade = new Uint8Array(buf, o, n); o += n;
+  const floors = new Uint8Array(buf, o, n);
+  return { n, nRings, nVerts, prismRing, ringVert, verts, height, facade, floors };
 }
 
 // EPSG:5186 (x 동, y 북, z 높이) → three.js (X = x, Y = 높이, Z = -y)
 function build(t, offX, offY) {
-  const { n, prismRing, ringVert, verts, height } = t;
+  const { n, prismRing, ringVert, verts, height, facade, floors } = t;
   // 정점 수: 벽은 변마다 4개(면 음영용 독립 법선), 지붕은 꼭짓점마다 1개
   let wallEdges = 0;
   for (let r = 0; r < t.nRings; r++) wallEdges += ringVert[r + 1] - ringVert[r];
@@ -37,11 +38,15 @@ function build(t, offX, offY) {
   }
   const pos = new Float32Array(nV * 3);
   const nor = new Float32Array(nV * 3);
+  // 외장 패턴용: (벽 가운데 기준 가로 위치 u, 벽 반길이(지붕은 -1), 층 간격, 외장 그룹)
+  const wall = new Float32Array(nV * 4);
   const idx = nV > 65535 ? new Uint32Array(nTri * 3) : new Uint16Array(nTri * 3);
   let v = 0, k = 0;
 
   for (let i = 0; i < n; i++) {
     const h = height[i];
+    const fh = h / Math.max(1, floors[i]);
+    const fg = facade[i];
     const r0 = prismRing[i], r1 = prismRing[i + 1];
     // 벽: 링은 재료가 진행 방향 왼쪽(외곽 반시계, 구멍 시계)이므로 바깥 법선 = (dy, -dx)
     for (let r = r0; r < r1; r++) {
@@ -54,10 +59,13 @@ function build(t, offX, offY) {
         const len = Math.hypot(nx, ny) || 1;
         nx /= len; ny /= len;
         const base = v;
+        const half = len / 2;
         const quad = [ax, ay, 0, bx, by, 0, bx, by, h, ax, ay, h];
+        const us = [-half, half, half, -half];
         for (let q = 0; q < 4; q++) {
           pos[3 * v] = quad[3 * q]; pos[3 * v + 1] = quad[3 * q + 2]; pos[3 * v + 2] = -quad[3 * q + 1];
           nor[3 * v] = nx; nor[3 * v + 1] = 0; nor[3 * v + 2] = -ny;
+          wall[4 * v] = us[q]; wall[4 * v + 1] = half; wall[4 * v + 2] = fh; wall[4 * v + 3] = fg;
           v++;
         }
         // 바깥에서 볼 때 반시계: a0 b0 b1 / a0 b1 a1
@@ -75,6 +83,7 @@ function build(t, offX, offY) {
     for (let j = vs; j < ve; j++) {
       pos[3 * v] = verts[2 * j] + offX; pos[3 * v + 1] = h; pos[3 * v + 2] = -(verts[2 * j + 1] + offY);
       nor[3 * v] = 0; nor[3 * v + 1] = 1; nor[3 * v + 2] = 0;
+      wall[4 * v] = 0; wall[4 * v + 1] = -1; wall[4 * v + 2] = fh; wall[4 * v + 3] = fg;
       v++;
     }
     for (let m = 0; m < tri.length; m += 3) {
@@ -85,20 +94,17 @@ function build(t, offX, offY) {
     }
   }
   // earcut이 퇴화 다각형에서 삼각형을 덜 내면 k < idx.length
-  return { pos, nor, idx: idx.subarray(0, k), triangles: k / 3 };
+  return { pos, nor, wall, idx: idx.subarray(0, k), triangles: k / 3 };
 }
 
-self.onmessage = async (ev) => {
-  const { id, url, offX, offY } = ev.data;
+self.onmessage = (ev) => {
+  const { id, buf, offX, offY } = ev.data;
   try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`${res.status} ${url}`);
-    const buf = await res.arrayBuffer();
     const t = decode(buf);
     const g = build(t, offX, offY);
     const idx = g.idx.slice();   // subarray → 독립 버퍼로 복사해 transfer
-    self.postMessage({ id, ok: true, pos: g.pos, nor: g.nor, idx, triangles: g.triangles, bytes: buf.byteLength, prisms: t.n },
-      [g.pos.buffer, g.nor.buffer, idx.buffer]);
+    self.postMessage({ id, ok: true, pos: g.pos, nor: g.nor, wall: g.wall, idx, triangles: g.triangles, bytes: buf.byteLength, prisms: t.n },
+      [g.pos.buffer, g.nor.buffer, g.wall.buffer, idx.buffer]);
   } catch (err) {
     self.postMessage({ id, ok: false, error: String(err) });
   }

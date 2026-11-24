@@ -1,18 +1,25 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { CONFIG } from './config.js';
-import { TileManager } from './tiles.js';
+import { CONFIG, SETTINGS, saveSettings } from './config.js';
+import { TileManager, TileSource } from './tiles.js';
 import { createSky } from './sky.js';
+import { createBuildingMaterial } from './material.js';
 
 const HORIZON = 0xd9e2ea;   // 안개 = 지평선 색
 const ZENITH = 0x6f9fd8;
 
 const statsEl = document.getElementById('stats');
 
+function makeRenderer() {
+  const r = new THREE.WebGLRenderer({ antialias: SETTINGS.aa, powerPreference: 'high-performance' });
+  r.setPixelRatio(Math.min(window.devicePixelRatio, SETTINGS.dpr));
+  r.setSize(window.innerWidth, window.innerHeight);
+  return r;
+}
+
 async function main() {
-  const res = await fetch(`${CONFIG.tilesBase}${CONFIG.region}/manifest.json`);
-  if (!res.ok) throw new Error(`manifest를 읽지 못했습니다 (${res.status}). scripts/tile.py로 타일을 먼저 만드세요.`);
-  const manifest = await res.json();
+  const source = new TileSource(CONFIG.tileMode, CONFIG.tilesBase, CONFIG.region);
+  const manifest = await source.loadIndex();
 
   // 장면 원점 = 시작 위치. three.js 좌표: X = 동, Y = 위, Z = -북
   const origin = { x: manifest.start.x, y: manifest.start.y };
@@ -23,10 +30,8 @@ async function main() {
     ymin: Math.max(origin.y - H, by0), ymax: Math.min(origin.y + H, by1),
   };
 
-  const renderer = new THREE.WebGLRenderer({ antialias: CONFIG.antialias, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, CONFIG.pixelRatioMax));
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  document.body.appendChild(renderer.domElement);
+  let renderer = makeRenderer();
+  document.body.prepend(renderer.domElement);
 
   const scene = new THREE.Scene();
   scene.fog = new THREE.Fog(HORIZON, CONFIG.fog.near, CONFIG.fog.far);
@@ -51,8 +56,8 @@ async function main() {
   ground.position.y = -0.05;
   scene.add(ground);
 
-  const material = new THREE.MeshLambertMaterial({ color: 0xece7de });
-  const tiles = new TileManager(scene, manifest, material, origin);
+  let material = createBuildingMaterial(SETTINGS);
+  const tiles = new TileManager(scene, manifest, material, origin, source);
 
   const controls = new OrbitControls(camera, renderer.domElement);
   const polar = Math.PI / 2 - el;
@@ -83,10 +88,9 @@ async function main() {
   });
 
   // 프레임 수: 0.5초마다 갱신
-  let frames = 0, lastT = performance.now(), fps = 0, frameMs = 0, lastTile = 0;
-  let info = { triangles: 0, calls: 0 };
+  let frames = 0, lastT = performance.now(), lastTile = 0;
 
-  renderer.setAnimationLoop((now) => {
+  const loop = (now) => {
     controls.update();
     clampTarget();
     sky.position.copy(camera.position);
@@ -95,23 +99,68 @@ async function main() {
       tiles.update(origin.x + controls.target.x, origin.y - controls.target.z);
     }
     renderer.render(scene, camera);
-    info = { triangles: renderer.info.render.triangles, calls: renderer.info.render.calls };
+    const info = { triangles: renderer.info.render.triangles, calls: renderer.info.render.calls };
     frames++;
     if (now - lastT >= 500) {
-      fps = (frames * 1000) / (now - lastT);
-      frameMs = (now - lastT) / frames;
+      const fps = (frames * 1000) / (now - lastT);
+      const frameMs = (now - lastT) / frames;
       frames = 0; lastT = now;
       const s = tiles.stats();
       statsEl.textContent =
         `FPS ${fps.toFixed(1)} (${frameMs.toFixed(1)} ms)\n` +
         `삼각형 ${info.triangles.toLocaleString()}  draw call ${info.calls}\n` +
         `타일 LOD0/1/2 ${s.byLod.join('/')}  대기 ${s.pending}\n` +
-        `받은 데이터 ${(s.loadedBytes / 1024 / 1024).toFixed(2)} MB${s.errors ? `  오류 ${s.errors}` : ''}\n` +
-        `주시점 ${(origin.x + controls.target.x).toFixed(0)}, ${(origin.y - controls.target.z).toFixed(0)}  ` +
-        `${renderer.getPixelRatio().toFixed(2)}x`;
-      window.__viewerStats = { fps, frameMs, ...info, ...s };   // 자동 점검용
+        `받은 데이터 ${(s.netBytes / 1024 / 1024).toFixed(2)} MB (타일 ${(s.loadedBytes / 1024 / 1024).toFixed(2)} MB)${s.errors ? `  오류 ${s.errors}` : ''}\n` +
+        `픽셀 ${renderer.getPixelRatio().toFixed(2)}x  AA ${SETTINGS.aa ? '켬' : '끔'}  ` +
+        `외장 ${SETTINGS.facade ? '켬' : '끔'}  그늘 ${SETTINGS.ground ? '켬' : '끔'}`;
+      window.__viewerStats = { fps, frameMs, ...info, ...s, settings: { ...SETTINGS } };   // 자동 점검용
     }
-  });
+  };
+  renderer.setAnimationLoop(loop);
+
+  // 설정 적용. 안티에일리어싱은 WebGL 컨텍스트를 새로 만들어야 바뀐다
+  const apply = (key) => {
+    if (key === 'dpr') {
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, SETTINGS.dpr));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    } else if (key === 'aa') {
+      const old = renderer;
+      old.setAnimationLoop(null);
+      renderer = makeRenderer();
+      old.domElement.replaceWith(renderer.domElement);
+      controls.disconnect();
+      controls.connect(renderer.domElement);
+      old.dispose();
+      old.forceContextLoss();
+      renderer.setAnimationLoop(loop);
+    } else {
+      const old = material;
+      material = createBuildingMaterial(SETTINGS);
+      tiles.setMaterial(material);
+      old.dispose();
+    }
+    saveSettings();
+  };
+  setupPanel(apply);
+
+  // 자동 점검(헤드리스 스크린샷)용 손잡이. 화면 기능에는 쓰지 않는다
+  window.__viewer = { camera, controls, origin };
+}
+
+function setupPanel(apply) {
+  const panel = document.getElementById('panel');
+  document.getElementById('panel-toggle').addEventListener('click', () => { panel.hidden = !panel.hidden; });
+  const dpr = panel.querySelector('[name=dpr]');
+  const known = [...dpr.options].map((o) => Number(o.value));
+  if (!known.includes(SETTINGS.dpr)) dpr.add(new Option(`${SETTINGS.dpr}`, `${SETTINGS.dpr}`));
+  dpr.value = `${SETTINGS.dpr}`;
+  dpr.addEventListener('change', () => { SETTINGS.dpr = Number(dpr.value); apply('dpr'); });
+  for (const key of ['aa', 'facade', 'ground']) {
+    const box = panel.querySelector(`[name=${key}]`);
+    box.checked = SETTINGS[key];
+    box.addEventListener('change', () => { SETTINGS[key] = box.checked; apply(key); });
+  }
+  document.getElementById('device-dpr').textContent = `기기 ${window.devicePixelRatio.toFixed(2)}`;
 }
 
 main().catch((e) => {

@@ -26,8 +26,8 @@ GeoParquet, 좌표계 EPSG:5186(미터). 1행 = 원본 1건(제외된 건물도 
 | `duplicate` | 형상이 완전히 같은 중복(첫 건만 유지) | `excluded` |
 | `out_of_range` | 원본 높이가 2~600m 밖 | `floors` 또는 `area_default` |
 | `ratio_low` / `ratio_high` | 2층 이상에서 높이/층수 < 2.0 / > 8.0 | `floors` |
-| `single_story_tall` | 1층인데 20m 초과(예외 용도 아님) | `floors` |
-| `single_story_tall_kept` | 1층·20m 초과지만 공장·창고·운동·종교시설이라 원본 유지 | `orig` |
+| `single_story_tall` | 1층인데 20m 초과, 검사 대상 용도(단독·공동주택, 근린생활, 업무) | `floors` |
+| `single_story_tall_kept` | 1층·20m 초과지만 검사 대상 용도가 아니라 원본 유지 | `orig` |
 | `large_default` | 면적 300m² 이상인데 기본 높이 사용 | `area_default` |
 | `geom_fixed` | 무효 폴리곤 보정 | 무관 |
 
