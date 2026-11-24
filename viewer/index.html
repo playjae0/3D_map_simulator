@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>3D 지도 뷰어</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #d9e2ea; }
+      canvas { display: block; touch-action: none; }
+      #stats {
+        position: fixed; top: 8px; left: 8px; padding: 6px 8px; white-space: pre;
+        font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; color: #fff;
+        background: rgba(0, 0, 0, 0.55); border-radius: 4px; pointer-events: none;
+      }
+      #hint {
+        position: fixed; bottom: 8px; left: 8px; padding: 4px 8px;
+        font: 12px/1.4 system-ui, sans-serif; color: #fff; background: rgba(0, 0, 0, 0.45);
+        border-radius: 4px; pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stats">불러오는 중…</div>
+    <div id="hint">한 손가락·왼쪽 드래그: 이동 / 두 손가락·오른쪽 드래그: 회전</div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
