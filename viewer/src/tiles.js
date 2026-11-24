@@ -3,7 +3,8 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 
 // 타일 바이트 받기. files: 타일마다 파일 1개(manifest.json)
-// pack: LOD별 묶음 파일 + index.json의 offset·length로 잘라 읽기(artifact 배포용, 파일 수 제한)
+// pack: LOD별 묶음 파일 + index.json의 offset·length로 잘라 읽기(artifact 배포용, 파일 수 제한).
+//       artifact가 임의 바이너리를 제공하지 않아 묶음은 타일별 base64 텍스트를 이어 붙인 것이다
 export class TileSource {
   constructor(mode, base, region) {
     this.mode = mode;
@@ -50,19 +51,26 @@ export class TileSource {
       if (r.partial) return r.buf;
       st.range = false; st.whole = r.buf;
     }
-    return st.whole.slice(e.o, e.o + e.b);
+    return b64ToBuffer(st.whole.substring(e.o, e.o + e.l));
   }
 
   async _fetch(pack, e) {
     const url = `${this.dir}${pack.file}`;
-    const res = await fetch(url, { headers: { Range: `bytes=${e.o}-${e.o + e.b - 1}` } });
+    const res = await fetch(url, { headers: { Range: `bytes=${e.o}-${e.o + e.l - 1}` } });
     if (!res.ok) throw new Error(`${res.status} ${url}`);
-    const buf = await res.arrayBuffer();
-    this.netBytes += buf.byteLength;
-    if (res.status === 206 && buf.byteLength === e.b) return { partial: true, buf };
-    if (buf.byteLength !== pack.bytes) throw new Error(`묶음 파일 크기가 색인과 다릅니다: ${url}`);
-    return { partial: false, buf };
+    const txt = await res.text();
+    this.netBytes += txt.length;
+    if (res.status === 206 && txt.length === e.l) return { partial: true, buf: b64ToBuffer(txt) };
+    if (txt.length !== pack.bytes) throw new Error(`묶음 파일 크기가 색인과 다릅니다: ${url}`);
+    return { partial: false, buf: txt };   // 전체 텍스트(잘라 쓰기는 get에서)
   }
+}
+
+function b64ToBuffer(s) {
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out.buffer;
 }
 
 export class TileManager {

@@ -88,14 +88,14 @@
 
 ### artifact 빌드 (`npm run build:artifact`)
 
-파일 7개, 9.43MB: JS 본체 0.57MB, Worker 9.7KB, index.html 2.2KB, index.json 0.27MB, 묶음 lod0 4.37MB / lod1 3.60MB / lod2 1.06MB
+파일 7개, 12.34MB: JS 본체 0.57MB, Worker 9.7KB, index.html 2.3KB, index.json 0.31MB, 묶음(base64 텍스트) lod0 5.83MB / lod1 4.80MB / lod2 1.41MB. 처음 바이너리 묶음(9.43MB)은 artifact가 형식을 거부해 base64로 바꿨다
 
 | 서버 | 묶음 요청 | 시작 화면까지 받은 양 |
 |---|---|---|
 | Range 지원(vite preview) | 타일마다 206 부분 응답 42회 | 0.47MB |
-| Range 미지원(python http.server) | LOD별 묶음 1회씩 200 응답 3회 | 8.61MB(LOD0~2 묶음 전체) |
+| Range 미지원(python http.server) | LOD별 묶음 1회씩 200 응답 3회 | 약 12MB(LOD0~2 묶음 전체, base64) |
 
-claude.ai artifact 호스팅이 Range를 지원하는지는 확인하지 않았다(미확인). 지원하지 않으면 처음에 약 9MB를 받는다.
+claude.ai artifact 호스팅이 Range를 지원하는지는 확인하지 않았다(미확인). 지원하지 않으면 처음에 약 12MB를 받는다(서버 압축이 있으면 줄어든다, 미확인).
 
 ## 남은 측정
 

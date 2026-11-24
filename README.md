@@ -104,7 +104,9 @@ npm run build && npm run preview:lan
 cd viewer && npm run build:artifact
 ```
 
-- 결과: `viewer/dist-artifact/` (git에 포함). 세종 기준 파일 7개, 약 9.4MB: `index.html`, JS 2개(본체·Worker), `tiles/36/index.json`, `tiles/36/lod0~2.bin`
+- 결과: `viewer/dist-artifact/` (git에 포함). 세종 기준 파일 7개, 약 12.3MB: `index.html`, JS 2개(본체·Worker), `tiles/36/index.json`, `tiles/36/lod0~2.b64.txt`
+- artifact는 임의 바이너리 파일을 제공하지 않으므로 묶음은 base64 텍스트다. 빌드 끝에 파일 형식도 검사한다
+- 게시본: https://claude.ai/artifact/J1taSE7AVDofRJgzSLbNMm (비공개, 소유자만 열 수 있음)
 - 타일은 LOD별 묶음 파일과 색인(index.json)으로 합친다(형식은 `docs/tiles.md`). 파일 수 256개 이하, 상대 경로만 쓰고 외부 주소를 부르지 않는지 빌드 끝에 검사한다
 - 로컬 확인:
 

@@ -69,11 +69,12 @@ claude.ai artifact는 한 번에 올릴 수 있는 파일이 256개 이하라서
 
 ```
 dist-artifact/tiles/<지역>/index.json     manifest.json + packs + 타일별 offset
-dist-artifact/tiles/<지역>/lod<n>.bin     해당 LOD 타일 .bin을 manifest.tiles 순서로 이어 붙인 것
+dist-artifact/tiles/<지역>/lod<n>.b64.txt 해당 LOD 타일 .bin을 타일마다 base64로 바꿔 manifest.tiles 순서로 이어 붙인 것
 ```
 
-- `packs: [{lod, file, bytes, tiles}]`, 각 타일의 `lod[n]`에 `o`(offset)를 더한다. 길이는 기존 `b`
-- 뷰어는 `Range: bytes=o-(o+b-1)`로 요청한다. 서버가 206을 주면 그 조각을 쓰고, 200(전체)을 주면 묶음 파일을 그 한 번만 받아 메모리에서 잘라 쓴다(첫 요청 결과를 본 뒤 나머지 요청을 보낸다)
+- artifact는 임의 바이너리(`application/octet-stream`)를 제공하지 않아 게시가 거부된다(2026-11-24 확인). 그래서 묶음은 텍스트(base64)다. 용량은 약 4/3배
+- `packs: [{lod, file, encoding: "base64", bytes, tiles}]`(bytes는 글자 수), 각 타일의 `lod[n]`에 `o`(글자 offset)와 `l`(글자 길이)를 더한다. `b`는 디코딩 후 바이트
+- 뷰어는 `Range: bytes=o-(o+l-1)`로 요청해 base64를 디코딩한다. 서버가 206을 주면 그 조각을 쓰고, 200(전체)을 주면 묶음 파일을 그 한 번만 받아 메모리에서 잘라 쓴다(첫 요청 결과를 본 뒤 나머지 요청을 보낸다)
 
 ## 뷰어의 선택 규칙 (`viewer/src/config.js`, 임시)
 
