@@ -22,7 +22,8 @@ if (!fs.existsSync(path.join(SRC, 'manifest.json'))) {
   process.exit(1);
 }
 
-// 1) 앱 빌드 (모드 artifact: 묶음 파일 읽기, 상대 경로)
+// 1) 앱 빌드 (모드 artifact: 묶음 파일 읽기, 상대 경로). artifact는 쿼리 문자열이 없으므로 지역을 빌드에 넣는다
+process.env.VITE_REGION = REGION;
 await build({
   root: ROOT,
   mode: 'artifact',
@@ -55,6 +56,8 @@ for (let lod = 0; lod < manifest.lods.length; lod++) {
   fs.writeFileSync(path.join(tileDir, file), Buffer.concat(parts));
   packs.push({ lod, file, encoding: 'base64', bytes: offset, tiles: parts.length });
 }
+// 미니맵 개요 이미지(.png는 artifact 제공 형식)
+if (manifest.overview) fs.copyFileSync(path.join(SRC, manifest.overview.file), path.join(tileDir, manifest.overview.file));
 const index = { ...manifest, packs, packed_from: 'manifest.json' };
 fs.writeFileSync(path.join(tileDir, 'index.json'), JSON.stringify(index));
 

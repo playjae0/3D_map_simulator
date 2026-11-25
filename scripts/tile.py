@@ -19,6 +19,8 @@ import geopandas as gpd
 import numpy as np
 import shapely
 
+from overview import area_labels, render_overview
+
 FACADE_ENUM = ["unknown", "apartment", "house", "commercial", "office", "industrial", "public"]
 MAGIC, VERSION = b"BLDT", 2   # v2: 층수(u8) 배열 추가
 MIN_FLOOR_SAMPLE = 100       # 그룹 층고 중앙값을 쓰는 최소 표본 수. 미만이면 전체 중앙값
@@ -167,6 +169,10 @@ def main() -> None:
         "summary": summary,
         "tiles": sorted(tiles.values(), key=lambda t: (t["x"], t["y"])),
     }
+    # 미니맵 개요 이미지와 법정동 라벨
+    ov = render_overview(b, out_dir / "overview.png")
+    manifest["overview"] = {"file": "overview.png", **ov}
+    manifest["labels"] = area_labels(b) if "area_code" in b.columns else []
     # LOD2에 건물이 없는 타일은 파일 없음(null)
     with open(out_dir / "manifest.json", "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, separators=(",", ":"))

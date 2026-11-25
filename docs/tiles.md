@@ -57,6 +57,8 @@ floors: {floor_height_m: {그룹: 층고 중앙값}, overall_m, rule}   층수�
 lods: [{lod, name, ...LOD2 기준}]
 bounds: [xmin, ymin, xmax, ymax]      건물 범위
 start: {x, y, tile, rule}             시작 위치 = LOD0 삼각형이 가장 많은 타일의 중심
+overview: {file, bounds, width, height, m_per_px}   미니맵 개요 이미지(overview.png, 북쪽 위). bounds는 이미지 가장자리의 EPSG:5186 좌표
+labels: [{code, name, x, y, n}]       법정동(리) 라벨. 위치 = 동별 건물 중심점 중앙값에 가장 가까운 건물 중심점, n = 건물 수(내림차순)
 summary: {lod: {tiles, buildings, prisms, vertices, triangles, bytes, bytes_gzip, ...}}
 tiles: [{x, y, hmax, lod: [{n 건물 수, t 삼각형 수, b 바이트, gz gzip 바이트} | null] × 3}]
 ```
@@ -78,6 +80,9 @@ dist-artifact/tiles/<지역>/lod<n>.b64.txt 해당 LOD 타일 .bin을 타일마�
 
 ## 뷰어의 선택 규칙 (`viewer/src/config.js`, 임시)
 
-- 카메라 주시점(지면)에서 타일 경계까지의 최단 거리 d로 고른다: d < 500m → LOD0, < 1100m → LOD1, < 2000m → LOD2, 그 밖은 불러오지 않는다
+- 카메라에서 타일 상자(바닥~타일 최고 건물 높이)까지 거리 d로 고른다: d < 1,000m → LOD0, < 2,000m → LOD1, < 안개 끝 + 200m → LOD2, 그 밖은 불러오지 않는다
+- 안개 끝 = max(2,300m, 2.6 × 카메라-주시점 거리). 줌아웃할수록 멀리까지 불러온다
+- 시야를 조금 넓힌 절두체(세로 시야각 +15°, 가로 ×1.2)와 겹치는 타일, 또는 주시점에서 900m 안의 타일만 불러온다(회전 대비). 나머지는 화면에서 내리고 메시는 캐시에 남긴다
 - 먼 단계로 바꿀 때는 100m를 더 기다린다(경계 깜빡임 방지). 새 단계가 준비될 때까지 이전 단계를 보여 준다
-- 거리 기준은 폰 프레임 실측 후 조정한다
+- 수치는 임시. 송파구 화면과 폰 프레임 실측 후 조정한다
+- artifact 묶음에는 `overview.png`도 함께 넣는다(PNG는 artifact 제공 형식)

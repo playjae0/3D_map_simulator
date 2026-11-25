@@ -31,7 +31,8 @@ AREA_DEFAULT = [3.5, 4.0, 4.7, 5.9, 7.5, 9.5]
 LARGE_DEFAULT_AREA = 300.0
 
 # AL_D010 칼럼 → 의미
-COL = {"id": "A0", "sigungu": "A23", "use": "A9", "approval": "A13", "height": "A16", "floors": "A26"}
+COL = {"id": "A0", "sigungu": "A23", "use": "A9", "approval": "A13", "height": "A16", "floors": "A26",
+       "area_code": "A3", "area_name": "A4"}
 
 FACADE_CSV = Path(__file__).with_name("facade_groups.csv")
 
@@ -124,6 +125,9 @@ def refine(g: gpd.GeoDataFrame) -> tuple[gpd.GeoDataFrame, dict]:
         "h_flag": pd.Series(["|".join(f) for f in flags], dtype="string"),
         "facade": facade.astype("string"),
         "approval_year": yr,
+        # 법정동(리): 코드와 이름. 이름은 A4("서울특별시 송파구 잠실동")의 마지막 토막
+        "area_code": g[COL["area_code"]].astype("string"),
+        "area_name": g[COL["area_name"]].astype("string").str.split().str[-1],
         "src_height": src_h.astype("Float32"),
         "src_floors": src_fl.astype("Int16"),
     }, geometry=gpd.GeoSeries(geom, crs=g.crs), crs=g.crs)

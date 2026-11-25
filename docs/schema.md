@@ -15,6 +15,8 @@ GeoParquet, 좌표계 EPSG:5186(미터). 1행 = 원본 1건(제외된 건물도 
 | `h_flag` | string | 아니오(빈 문자열 허용) | 이상·주의 사유. 여러 개면 `\|`로 연결 (아래 표) |
 | `facade` | string | 아니오 | 외장 패턴 그룹: `apartment` `house` `commercial` `office` `industrial` `public` `unknown` |
 | `approval_year` | int16 | 예 | 사용승인연도. AL_D010은 A13의 연도 |
+| `area_code` | string | 예 | 법정동(리) 코드. AL_D010은 A3(10자리) |
+| `area_name` | string | 예 | 법정동(리) 이름. AL_D010은 A4의 마지막 토막(예: "잠실동", "부강리"). 뷰어 라벨용 |
 | `src_height` | float32 | 예 | 원본 높이 그대로(AL_D010: A16). 0·NULL 유지 |
 | `src_floors` | int16 | 예 | 원본 지상층수 그대로(AL_D010: A26) |
 

@@ -15,7 +15,7 @@
         top: 8px; left: 8px; padding: 6px 8px; white-space: pre; pointer-events: none;
         font-family: ui-monospace, Menlo, Consolas, monospace;
       }
-      #hint { bottom: 30px; left: 8px; padding: 4px 8px; pointer-events: none; max-width: calc(100% - 32px); }
+      #hint { bottom: 30px; left: 8px; padding: 4px 8px; pointer-events: none; max-width: calc(100% - 190px); }
       #attribution {
         bottom: 6px; right: 6px; padding: 3px 7px; font-size: 11px; pointer-events: none;
         max-width: calc(100% - 28px);
@@ -27,7 +27,19 @@
       #panel label { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px 0; }
       #panel select, #panel input { font-size: 13px; }
       #panel .note { opacity: 0.75; font-size: 11px; margin-top: 4px; }
-      @media (max-width: 560px) { #panel { top: 128px; } }   /* 좁은 화면: 통계를 가리지 않게 아래로 */
+      @media (max-width: 560px) { #panel { top: 150px; } }   /* 좁은 화면: 통계를 가리지 않게 아래로 */
+      #minimap {
+        position: fixed; bottom: 30px; right: 6px; border-radius: 4px; overflow: hidden; cursor: crosshair;
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35); touch-action: none; background: #1d2329;
+      }
+      #minimap img, #minimap canvas { position: absolute; inset: 0; width: 100%; height: 100%; user-select: none; }
+      #minimap img { opacity: 0.92; pointer-events: none; }
+      #labels { position: fixed; inset: 0; pointer-events: none; overflow: hidden; transition: opacity 0.2s; }
+      .area-label {
+        position: absolute; left: 0; top: 0; padding: 2px 6px; white-space: nowrap;
+        font: 600 13px/18px system-ui, sans-serif; color: #1c232a; background: rgba(255, 255, 255, 0.82);
+        border-radius: 3px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+      }
     </style>
   </head>
   <body>
@@ -47,7 +59,9 @@
       <label>접지 그늘 <input type="checkbox" name="ground" /></label>
       <div class="note" id="device-dpr"></div>
     </div>
-    <div id="hint" class="overlay">한 손가락·왼쪽 드래그: 이동 / 두 손가락·오른쪽 드래그: 회전</div>
+    <div id="labels"></div>
+    <div id="minimap" hidden title="누르면 그 위치로 이동"></div>
+    <div id="hint" class="overlay">이동: 한 손가락·왼쪽 드래그 / 확대·축소: 두 손가락 벌리기·휠 / 회전: 두 손가락 끌기·오른쪽 드래그</div>
     <div id="attribution" class="overlay">건물 데이터: 국토교통부 GIS건물통합정보 (공공누리 제1유형)</div>
     <script type="module" src="/src/main.js"></script>
   </body>

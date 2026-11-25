@@ -81,10 +81,17 @@ export class TileManager {
     this.origin = origin;                       // 장면 원점(EPSG:5186)
     this.source = source;
     this.size = manifest.tile_size;
-    this.tiles = manifest.tiles.map((t) => ({
-      ...t, xmin: t.x * this.size, ymin: t.y * this.size, xmax: (t.x + 1) * this.size, ymax: (t.y + 1) * this.size,
-      want: -1, shown: -1, mesh: null,
-    }));
+    // 타일 상자(장면 좌표: X = 동, Y = 위, Z = -북). 높이는 타일 안 최고 건물까지
+    this.tiles = manifest.tiles.map((t) => {
+      const xmin = t.x * this.size, ymin = t.y * this.size;
+      const box = new THREE.Box3(
+        new THREE.Vector3(xmin - origin.x, 0, -(ymin + this.size - origin.y)),
+        new THREE.Vector3(xmin + this.size - origin.x, Math.max(t.hmax, 1), -(ymin - origin.y)));
+      return { ...t, xmin, ymin, box, want: -1, shown: -1, mesh: null };
+    });
+    this._frustum = new THREE.Frustum();
+    this._wideCam = new THREE.PerspectiveCamera();
+    this._m = new THREE.Matrix4();
     this.cache = new Map();                      // key → {geometry, triangles, bytes, used}
     this.pending = new Map();                    // key → true
     this.queue = [];
@@ -103,14 +110,8 @@ export class TileManager {
     for (const t of this.tiles) if (t.mesh) t.mesh.material = material;
   }
 
-  _dist(t, x, y) {
-    const dx = Math.max(t.xmin - x, 0, x - t.xmax);
-    const dy = Math.max(t.ymin - y, 0, y - t.ymax);
-    return Math.hypot(dx, dy);
-  }
-
-  _lodFor(t, d) {
-    const R = CONFIG.lodRadii;
+  _lodFor(t, d, loadMax) {
+    const R = [...CONFIG.lodDist, loadMax];
     let lod = -1;
     for (let i = 0; i < R.length; i++) {
       // 지금 보이는 단계보다 먼 단계로 바꿀 때만 여유를 준다(경계에서 깜빡임 방지)
@@ -122,12 +123,25 @@ export class TileManager {
     return lod;
   }
 
-  // x, y: 주시점(EPSG:5186)
-  update(x, y) {
+  // camera: 장면 카메라, target: 주시점(장면 좌표), loadMax: 이 거리(안개 끝 부근)보다 먼 타일은 내린다
+  update(camera, target, loadMax) {
+    // 시야를 조금 넓힌 절두체: 화면 가장자리 타일을 미리 불러온다
+    const w = this._wideCam;
+    w.copy(camera);
+    w.fov = Math.min(camera.fov + 15, 120);
+    w.aspect = camera.aspect * 1.2;
+    w.far = loadMax + 500;
+    w.updateProjectionMatrix();
+    w.updateMatrixWorld();
+    this._frustum.setFromProjectionMatrix(this._m.multiplyMatrices(w.projectionMatrix, w.matrixWorldInverse));
+    const cam = camera.position;
     const need = [];
     for (const t of this.tiles) {
-      const d = this._dist(t, x, y);
-      t.want = this._lodFor(t, d);
+      const d = t.box.distanceToPoint(cam);
+      const near = Math.hypot(Math.max(t.box.min.x - target.x, 0, target.x - t.box.max.x),
+        Math.max(t.box.min.z - target.z, 0, target.z - t.box.max.z)) < CONFIG.nearKeep;
+      const visible = near || this._frustum.intersectsBox(t.box);
+      t.want = visible ? this._lodFor(t, d, loadMax) : -1;
       if (t.want !== t.shown) {
         if (t.want < 0) { this._hide(t); continue; }
         const key = `${t.want}/${t.x}_${t.y}`;
