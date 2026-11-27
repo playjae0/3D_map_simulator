@@ -2,23 +2,102 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 
+// 타일 바이트 받기. files: 타일마다 파일 1개(manifest.json)
+// pack: LOD별 묶음 파일 + index.json의 offset·length로 잘라 읽기(artifact 배포용, 파일 수 제한).
+//       artifact가 임의 바이너리를 제공하지 않아 묶음은 타일별 base64 텍스트를 이어 붙인 것이다
+export class TileSource {
+  constructor(mode, base, region) {
+    this.mode = mode;
+    this.dir = `${base}${region}/`;
+    this.packs = {};
+    this.netBytes = 0;                           // 실제로 받은 바이트(묶음 파일을 통째로 받은 경우 포함)
+  }
+
+  async loadIndex() {
+    const name = this.mode === 'pack' ? 'index.json' : 'manifest.json';
+    const res = await fetch(`${this.dir}${name}`);
+    if (!res.ok) throw new Error(`${name}를 읽지 못했습니다 (${res.status}). scripts/tile.py로 타일을 먼저 만드세요.`);
+    this.index = await res.json();
+    return this.index;
+  }
+
+  async get(lod, t) {
+    if (this.mode === 'files') {
+      const res = await fetch(`${this.dir}${lod}/${t.x}_${t.y}.bin`);
+      if (!res.ok) throw new Error(`${res.status} ${lod}/${t.x}_${t.y}`);
+      const buf = await res.arrayBuffer();
+      this.netBytes += buf.byteLength;
+      return buf;
+    }
+    const e = t.lod[lod];
+    const pack = this.index.packs[lod];
+    const st = (this.packs[lod] ??= { range: null, probe: null, whole: null });
+    // 첫 요청으로 서버가 Range(부분 요청)를 지원하는지 본다. 지원하지 않으면 묶음 파일을 한 번만 받아 잘라 쓴다
+    if (st.range === null) {
+      if (!st.probe) {
+        st.probe = this._fetch(pack, e).then((r) => {
+          st.range = r.partial;
+          if (!r.partial) st.whole = r.buf;
+          return r;
+        }).catch((err) => { st.probe = null; throw err; });
+        const r = await st.probe;
+        if (r.partial) return r.buf;
+      } else {
+        await st.probe;
+      }
+    }
+    if (st.range) {
+      const r = await this._fetch(pack, e);
+      if (r.partial) return r.buf;
+      st.range = false; st.whole = r.buf;
+    }
+    return b64ToBuffer(st.whole.substring(e.o, e.o + e.l));
+  }
+
+  async _fetch(pack, e) {
+    const url = `${this.dir}${pack.file}`;
+    const res = await fetch(url, { headers: { Range: `bytes=${e.o}-${e.o + e.l - 1}` } });
+    if (!res.ok) throw new Error(`${res.status} ${url}`);
+    const txt = await res.text();
+    this.netBytes += txt.length;
+    if (res.status === 206 && txt.length === e.l) return { partial: true, buf: b64ToBuffer(txt) };
+    if (txt.length !== pack.bytes) throw new Error(`묶음 파일 크기가 색인과 다릅니다: ${url}`);
+    return { partial: false, buf: txt };   // 전체 텍스트(잘라 쓰기는 get에서)
+  }
+}
+
+function b64ToBuffer(s) {
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out.buffer;
+}
+
 export class TileManager {
-  constructor(scene, manifest, material, origin) {
+  constructor(scene, manifest, material, origin, source) {
     this.scene = scene;
     this.manifest = manifest;
     this.material = material;
     this.origin = origin;                       // 장면 원점(EPSG:5186)
+    this.source = source;
     this.size = manifest.tile_size;
-    this.tiles = manifest.tiles.map((t) => ({
-      ...t, xmin: t.x * this.size, ymin: t.y * this.size, xmax: (t.x + 1) * this.size, ymax: (t.y + 1) * this.size,
-      want: -1, shown: -1, mesh: null,
-    }));
+    // 타일 상자(장면 좌표: X = 동, Y = 위, Z = -북). 높이는 타일 안 최고 건물까지
+    this.tiles = manifest.tiles.map((t) => {
+      const xmin = t.x * this.size, ymin = t.y * this.size;
+      const box = new THREE.Box3(
+        new THREE.Vector3(xmin - origin.x, 0, -(ymin + this.size - origin.y)),
+        new THREE.Vector3(xmin + this.size - origin.x, Math.max(t.hmax, 1), -(ymin - origin.y)));
+      return { ...t, xmin, ymin, box, want: -1, shown: -1, mesh: null };
+    });
+    this._frustum = new THREE.Frustum();
+    this._wideCam = new THREE.PerspectiveCamera();
+    this._m = new THREE.Matrix4();
     this.cache = new Map();                      // key → {geometry, triangles, bytes, used}
     this.pending = new Map();                    // key → true
     this.queue = [];
     this.workers = Array.from({ length: CONFIG.workers }, () =>
       new Worker(new URL('./tileWorker.js', import.meta.url), { type: 'module' }));
-    this.workers.forEach((w) => { w.onmessage = (e) => this._onLoaded(e.data); });
+    this.workers.forEach((w) => { w.onmessage = (e) => this._onBuilt(e.data); });
     this.nextWorker = 0;
     this.reqId = 0;
     this.callbacks = new Map();
@@ -26,14 +105,13 @@ export class TileManager {
     this.errors = 0;
   }
 
-  _dist(t, x, y) {
-    const dx = Math.max(t.xmin - x, 0, x - t.xmax);
-    const dy = Math.max(t.ymin - y, 0, y - t.ymax);
-    return Math.hypot(dx, dy);
+  setMaterial(material) {
+    this.material = material;
+    for (const t of this.tiles) if (t.mesh) t.mesh.material = material;
   }
 
-  _lodFor(t, d) {
-    const R = CONFIG.lodRadii;
+  _lodFor(t, d, loadMax) {
+    const R = [...CONFIG.lodDist, loadMax];
     let lod = -1;
     for (let i = 0; i < R.length; i++) {
       // 지금 보이는 단계보다 먼 단계로 바꿀 때만 여유를 준다(경계에서 깜빡임 방지)
@@ -45,12 +123,25 @@ export class TileManager {
     return lod;
   }
 
-  // x, y: 주시점(EPSG:5186)
-  update(x, y) {
+  // camera: 장면 카메라, target: 주시점(장면 좌표), loadMax: 이 거리(안개 끝 부근)보다 먼 타일은 내린다
+  update(camera, target, loadMax) {
+    // 시야를 조금 넓힌 절두체: 화면 가장자리 타일을 미리 불러온다
+    const w = this._wideCam;
+    w.copy(camera);
+    w.fov = Math.min(camera.fov + 15, 120);
+    w.aspect = camera.aspect * 1.2;
+    w.far = loadMax + 500;
+    w.updateProjectionMatrix();
+    w.updateMatrixWorld();
+    this._frustum.setFromProjectionMatrix(this._m.multiplyMatrices(w.projectionMatrix, w.matrixWorldInverse));
+    const cam = camera.position;
     const need = [];
     for (const t of this.tiles) {
-      const d = this._dist(t, x, y);
-      t.want = this._lodFor(t, d);
+      const d = t.box.distanceToPoint(cam);
+      const near = Math.hypot(Math.max(t.box.min.x - target.x, 0, target.x - t.box.max.x),
+        Math.max(t.box.min.z - target.z, 0, target.z - t.box.max.z)) < CONFIG.nearKeep;
+      const visible = near || this._frustum.intersectsBox(t.box);
+      t.want = visible ? this._lodFor(t, d, loadMax) : -1;
       if (t.want !== t.shown) {
         if (t.want < 0) { this._hide(t); continue; }
         const key = `${t.want}/${t.x}_${t.y}`;
@@ -69,16 +160,22 @@ export class TileManager {
       const { t, key, lod } = this.queue.shift();
       if (t.want !== lod) continue;
       this.pending.set(key, true);
-      const id = ++this.reqId;
-      this.callbacks.set(id, { t, key });
-      const url = new URL(`${CONFIG.tilesBase}${this.manifest.region}/${lod}/${t.x}_${t.y}.bin`, location.href).href;
-      const w = this.workers[this.nextWorker++ % this.workers.length];
-      // 타일 원점을 장면 원점 기준으로 옮겨 float32 정밀도를 지킨다
-      w.postMessage({ id, url, offX: t.xmin - this.origin.x, offY: t.ymin - this.origin.y });
+      this.source.get(lod, t).then((buf) => {
+        const id = ++this.reqId;
+        this.callbacks.set(id, { t, key });
+        const w = this.workers[this.nextWorker++ % this.workers.length];
+        // 타일 원점을 장면 원점 기준으로 옮겨 float32 정밀도를 지킨다
+        w.postMessage({ id, buf, offX: t.xmin - this.origin.x, offY: t.ymin - this.origin.y }, [buf]);
+      }).catch((err) => {
+        this.errors++;
+        console.error(err);
+        this.pending.delete(key);
+        this._pump();
+      });
     }
   }
 
-  _onLoaded(msg) {
+  _onBuilt(msg) {
     const cb = this.callbacks.get(msg.id);
     this.callbacks.delete(msg.id);
     this.pending.delete(cb.key);
@@ -89,6 +186,7 @@ export class TileManager {
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.BufferAttribute(msg.pos, 3));
       g.setAttribute('normal', new THREE.BufferAttribute(msg.nor, 3));
+      g.setAttribute('aWall', new THREE.BufferAttribute(msg.wall, 4));
       g.setIndex(new THREE.BufferAttribute(msg.idx, 1));
       g.computeBoundingSphere();
       this.cache.set(cb.key, { geometry: g, triangles: msg.triangles, bytes: msg.bytes, used: performance.now() });
@@ -134,6 +232,6 @@ export class TileManager {
     const byLod = [0, 0, 0];
     let tri = 0;
     for (const t of this.tiles) if (t.shown >= 0) { byLod[t.shown]++; tri += this.cache.get(t.shownKey).triangles; }
-    return { byLod, tri, pending: this.pending.size + this.queue.length, cached: this.cache.size, loadedBytes: this.loadedBytes, errors: this.errors };
+    return { byLod, tri, pending: this.pending.size + this.queue.length, cached: this.cache.size, loadedBytes: this.loadedBytes, netBytes: this.source.netBytes, errors: this.errors };
   }
 }

@@ -15,6 +15,8 @@ GeoParquet, 좌표계 EPSG:5186(미터). 1행 = 원본 1건(제외된 건물도 
 | `h_flag` | string | 아니오(빈 문자열 허용) | 이상·주의 사유. 여러 개면 `\|`로 연결 (아래 표) |
 | `facade` | string | 아니오 | 외장 패턴 그룹: `apartment` `house` `commercial` `office` `industrial` `public` `unknown` |
 | `approval_year` | int16 | 예 | 사용승인연도. AL_D010은 A13의 연도 |
+| `area_code` | string | 예 | 법정동(리) 코드. AL_D010은 A3(10자리) |
+| `area_name` | string | 예 | 법정동(리) 이름. AL_D010은 A4의 마지막 토막(예: "잠실동", "부강리"). 뷰어 라벨용 |
 | `src_height` | float32 | 예 | 원본 높이 그대로(AL_D010: A16). 0·NULL 유지 |
 | `src_floors` | int16 | 예 | 원본 지상층수 그대로(AL_D010: A26) |
 
@@ -26,8 +28,8 @@ GeoParquet, 좌표계 EPSG:5186(미터). 1행 = 원본 1건(제외된 건물도 
 | `duplicate` | 형상이 완전히 같은 중복(첫 건만 유지) | `excluded` |
 | `out_of_range` | 원본 높이가 2~600m 밖 | `floors` 또는 `area_default` |
 | `ratio_low` / `ratio_high` | 2층 이상에서 높이/층수 < 2.0 / > 8.0 | `floors` |
-| `single_story_tall` | 1층인데 20m 초과(예외 용도 아님) | `floors` |
-| `single_story_tall_kept` | 1층·20m 초과지만 공장·창고·운동·종교시설이라 원본 유지 | `orig` |
+| `single_story_tall` | 1층인데 20m 초과, 검사 대상 용도(단독·공동주택, 근린생활, 업무) | `floors` |
+| `single_story_tall_kept` | 1층·20m 초과지만 검사 대상 용도가 아니라 원본 유지 | `orig` |
 | `large_default` | 면적 300m² 이상인데 기본 높이 사용 | `area_default` |
 | `geom_fixed` | 무효 폴리곤 보정 | 무관 |
 

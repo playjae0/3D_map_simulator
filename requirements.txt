@@ -3,3 +3,4 @@ pyogrio>=0.9
 shapely>=2.1
 numpy
 pyarrow
+pillow>=10

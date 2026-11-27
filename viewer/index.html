@@ -7,21 +7,62 @@
     <style>
       html, body { margin: 0; height: 100%; overflow: hidden; background: #d9e2ea; }
       canvas { display: block; touch-action: none; }
-      #stats {
-        position: fixed; top: 8px; left: 8px; padding: 6px 8px; white-space: pre;
-        font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; color: #fff;
-        background: rgba(0, 0, 0, 0.55); border-radius: 4px; pointer-events: none;
+      .overlay {
+        position: fixed; font: 12px/1.4 system-ui, sans-serif; color: #fff;
+        background: rgba(0, 0, 0, 0.5); border-radius: 4px;
       }
-      #hint {
-        position: fixed; bottom: 8px; left: 8px; padding: 4px 8px;
-        font: 12px/1.4 system-ui, sans-serif; color: #fff; background: rgba(0, 0, 0, 0.45);
-        border-radius: 4px; pointer-events: none;
+      #stats {
+        top: 8px; left: 8px; padding: 6px 8px; white-space: pre; pointer-events: none;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+      }
+      #hint { bottom: 30px; left: 8px; padding: 4px 8px; pointer-events: none; max-width: calc(100% - 190px); }
+      #attribution {
+        bottom: 6px; right: 6px; padding: 3px 7px; font-size: 11px; pointer-events: none;
+        max-width: calc(100% - 28px);
+      }
+      #panel-toggle {
+        top: 8px; right: 8px; padding: 6px 10px; border: 0; cursor: pointer; font-size: 13px;
+      }
+      #panel { top: 44px; right: 8px; padding: 8px 10px; min-width: 170px; }
+      #panel label { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 4px 0; }
+      #panel select, #panel input { font-size: 13px; }
+      #panel .note { opacity: 0.75; font-size: 11px; margin-top: 4px; }
+      @media (max-width: 560px) { #panel { top: 150px; } }   /* 좁은 화면: 통계를 가리지 않게 아래로 */
+      #minimap {
+        position: fixed; bottom: 30px; right: 6px; border-radius: 4px; overflow: hidden; cursor: crosshair;
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35); touch-action: none; background: #1d2329;
+      }
+      #minimap img, #minimap canvas { position: absolute; inset: 0; width: 100%; height: 100%; user-select: none; }
+      #minimap img { opacity: 0.92; pointer-events: none; }
+      #labels { position: fixed; inset: 0; pointer-events: none; overflow: hidden; transition: opacity 0.2s; }
+      .area-label {
+        position: absolute; left: 0; top: 0; padding: 2px 6px; white-space: nowrap;
+        font: 600 13px/18px system-ui, sans-serif; color: #1c232a; background: rgba(255, 255, 255, 0.82);
+        border-radius: 3px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
       }
     </style>
   </head>
   <body>
-    <div id="stats">불러오는 중…</div>
-    <div id="hint">한 손가락·왼쪽 드래그: 이동 / 두 손가락·오른쪽 드래그: 회전</div>
+    <div id="stats" class="overlay">불러오는 중…</div>
+    <button id="panel-toggle" class="overlay" type="button">설정</button>
+    <div id="panel" class="overlay" hidden>
+      <label>픽셀 비율 상한
+        <select name="dpr">
+          <option value="1">1</option>
+          <option value="1.5">1.5</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+        </select>
+      </label>
+      <label>안티에일리어싱 <input type="checkbox" name="aa" /></label>
+      <label>외장 패턴 <input type="checkbox" name="facade" /></label>
+      <label>접지 그늘 <input type="checkbox" name="ground" /></label>
+      <div class="note" id="device-dpr"></div>
+    </div>
+    <div id="labels"></div>
+    <div id="minimap" hidden title="누르면 그 위치로 이동"></div>
+    <div id="hint" class="overlay">이동: 한 손가락·왼쪽 드래그 / 확대·축소: 두 손가락 벌리기·휠 / 회전: 두 손가락 끌기·오른쪽 드래그</div>
+    <div id="attribution" class="overlay">건물 데이터: 국토교통부 GIS건물통합정보 (공공누리 제1유형)</div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
