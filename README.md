@@ -1,6 +1,6 @@
 # 3d-map-simulator
 
-건물 외곽선과 높이로 도시를 LOD1 3D로 보여 주는 프로젝트. 결정과 근거는 `docs/`, 작업 규칙은 `CLAUDE.md`.
+건물 외곽선과 높이로 도시를 LOD1 3D로 보여 주는 프로젝트. 결정과 근거는 `docs/`, 작업 규칙은 `AGENTS.md`, 현재 상태와 다음 작업은 `docs/status.md`.
 
 ## 1. 데이터 처리 (Python 3.11+)
 
